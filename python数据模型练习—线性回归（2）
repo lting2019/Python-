@@ -1,0 +1,210 @@
+#线性回归模型
+#使用最小二乘法解线性回归模型的偏回归系数前提
+#1、自变量与因变量之间存在线性关系
+#2、自变量之间不存在多重共线性
+#3、回归模型的残差服从正态分布
+#4、回归模型的残差满足方差齐性（即方差为某个固定值）
+#5、回归模型的残差之间相互独立
+
+#除了上面之外，模型对异常值也是非常敏感
+
+#本次解决的问题是
+#1、变量间是否多重共线
+#2、异常值问题怎么处理
+#3、回归模型的残差是否服从正态分布
+
+#多重共线性导致的问题：
+#1、导致OLS估计量可能无效
+#2、增大OLS估计量的方差
+#3、变量的显著性检验将失去意义
+#4、模型缺乏稳定性
+#多重共线性的检验可以使用方差膨胀因子（VIF）来鉴定，
+#如果VIF大于10，则说明变量存在多重共线性
+#如果存在多重共线，可以考虑删除变量和重新选择模型（岭回归法）
+
+#异常点的检测方法：高杠杆值点（帽子矩阵）或dffits值，学生化残差、cook距离和covratio值判断
+#异常值的判断：
+#1、高杠杆值点（帽子矩阵）大于2(p+1)/n时，该样本点可能存在异常，p为自变量个数，n为观测数
+#2、当DFFITS统计值大于2squart((p+1)/n)时，该样本点可能存在异常
+#3、当学生化残差的绝对值大于2，该样本点可能存在异常
+#4、对于cook距离来说，没有明确的判断标准，一般值越大异常的可能性越高
+#5、对于covratio值来说，如果一个样本的covratio值离数值1越远，该样本点可能存在异常
+
+#异常值的处理
+#1、当异常比例极低时（如5%以内），可以考虑直接删除
+#2、当异常比例较高时，可以考虑将异常值衍生为哑变量，即异常值对应到1，非异常为0
+#3、单独把异常值提取出来，另行建模
+
+#当模型的残差服从正态性检验时，才能保证模型偏回归系数对于t值和模型F值的有效
+#模型建好后，要对模型的残差进行正态性检验
+#正态性检验方法有两类：
+#1、定性的图形法（直方图、PP图和QQ图）
+#2、定量的非参数法（Shapiro检验和K-S检验）,Shapiro检验要求样本量在5000以内
+#当残差不服从正态分布的话，建议对Y变量进行box-cox变换处理
+
+#导入第三方包
+import pandas as pd
+import numpy as np
+from patsy import dmatrices
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+import statsmodels.api as sm
+import scipy.stats as stats
+from sklearn.metrics import mean_squared_error
+import seaborn as sns
+import matplotlib.pyplot as plt
+import matplotlib.mlab as mlab
+
+#数据读取
+ccpp=pd.read_excel(r'D:\222学习\数据分析案例资料\CCPP.xlsx')
+ccpp.head()
+ccpp.describe()
+#AT:温度
+#V：压力
+#AP：相对湿度
+#RH：排气量
+#PE:发电量
+
+#绘制各变量之间的散点图
+sns.pairplot(ccpp)
+plt.show()
+#从散点图看出AP（相对湿度）、RH（排气量）与PE（发电量）之间并不存在
+#明显的线性关系
+#下面看下PE与其他变量之间的相关系数值
+
+#发电量与自变量之间的相关系数
+ccpp.corrwith(ccpp.PE)
+#一般情况：相关系数低于0.4弱相关，04~0.6之间中度相关，0.6以上强相关
+#PE与RH之间弱相关，暂不考虑纳入模型
+#但不表示不相关，可能是二次函数关系、对数关系等,一般还需要进行检验和变量转换
+
+#多重共线的检查
+#将因变量PE，自变量AT，V,AP和截距项（值为1的1维数组）以数据框的形式组合起来
+y,x=dmatrices('PE~AT+V+AP',data=ccpp,return_type='dataframe')
+
+#构造空的数据框
+vif=pd.DataFrame()
+vif['VIF Factor']=[variance_inflation_factor(x.values,i)
+                   for i in range(x.shape[1])]
+vif['features']=x.columns
+vif
+
+# 结果显示自变量的VIF均低于10，说明自变量之间不存在多重共线隐患
+
+#构造PE与AT、V和AP之间的线性模型
+fit=sm.formula.ols('PE~AT+V+AP',data=ccpp).fit()
+fit.summary()
+#计算模型的RMSE值
+pred=fit.predict()
+np.sqrt(mean_squared_error(ccpp.PE,pred))
+#通过建模结果看，模型通过显著性检验，系数通过显著性检验，R方达到0.9以上
+#接下来做异常值检测
+
+#异常点的检测方法：高杠杆值点（帽子矩阵）或dffits值，学生化残差、cook距离和covratio值判断
+
+#离群点检测
+outliers=fit.get_influence()
+
+#高杠杆值点（帽子矩阵）
+leverage=outliers.hat_matrix_diag
+
+#dffits值
+dffits=outliers.dffits[0]
+#学生化残差
+resid_stu=outliers.resid_studentized_external
+#cook距离
+cook=outliers.cooks_distance[0]
+#covratio值
+covratio=outliers.cov_ratio
+
+#将上面的几种异常值建安统计量与原始数据集合并
+contat1=pd.concat([pd.Series(leverage,name='leverage'),pd.Series(dffits,name='dffits'),
+                  pd.Series(resid_stu,name='resid_stu'),pd.Series(cook,name='cook'),
+                  pd.Series(covratio,name='covratio'),],axis=1)
+ccpp_outliers=pd.concat([ccpp,contat1],axis=1)
+ccpp_outliers.head()
+#这里以学生化残差作为判断标准，因为其包含了帽子矩阵和DFFITS的信息，没有大于2的
+
+#计算异常值数量的比例
+outliers_ratio=sum(np.where((np.abs(ccpp_outliers.resid_stu)>2),1,0))/ccpp_outliers.shape[0]
+outliers_ratio
+
+#删除异常值（3.7%异常值删除处理）
+ccpp_outliers=ccpp_outliers.loc[np.abs(ccpp_outliers.resid_stu)<=2]
+
+#重新建模
+fit2=sm.formula.ols('PE~AT+V+AP',data=ccpp_outliers).fit()
+fit2.summary()
+
+#计算模型的RMSE值
+pred2=fit2.predict()
+np.sqrt(mean_squared_error(ccpp_outliers.PE,pred2))
+
+#通过对比fit和fit2,异常值删除后重新建模效果更好，具体表现为：
+#信息准则（AIC和BIC）均变小
+#RMSE（误差均方根）由原来的4.89降低到4.26
+
+#残差正态性检验（直方图法）
+resid=fit2.resid
+#中文和负号的正常显示
+plt.rcParams['font.sans-serif']=['SimHei']
+plt.rcParams['axes.unicode_minus']=False
+
+plt.hist(resid,
+        bins=100,
+        normed=True,
+        color='steelblue',
+        edgecolor='k')
+
+plt.title('残差直方图')
+plt.ylabel('密度值')
+
+#生成正态曲线的数据
+x1=np.linspace(resid.min(),resid.max(),1000)
+normal=mlab.normpdf(x1,resid.mean(),resid.std())
+
+#绘制正态分布曲线
+plt.plot(x1,normal,'r--',linewidth=2,label='正态分布曲线')
+
+#生成核密度曲线的数据
+kde=mlab.GaussianKDE(resid)
+x2=np.linspace(resid.min(),resid.max(),1000)
+
+#绘制核密度曲线
+plt.plot(x2,kde(x2),'k--',linewidth=2,label='核密度曲线')
+
+plt.tick_params(top='off',right='off')
+plt.legend(loc='best')
+plt.show()
+
+#残差的正态性检验（PP图和QQ图）
+pp_qq_plot=sm.ProbPlot(resid)
+pp_qq_plot.ppplot(line='45')
+plt.title('P-P图')
+
+pp_qq_plot.qqplot(line='q')
+plt.title('Q-Q图')
+
+plt.show()
+
+#从PP图和QQ图来看，有一部分样本点没有落在参考线上，但绝大多数与参考线保持一致的步调
+
+#残差的正态性检验（非参数法）
+standard_resid=(resid-np.mean(resid))/np.std(resid)
+stats.kstest(standard_resid,'norm')
+
+#Shapiro检验要求样本量在5000以内，本次数据集有9000多，故采用K-S检验
+#从K-S检验的P值来看，拒绝了残差服从正态分布的假设，即残差不满足服从正态性假设这个前提
+#残差不服从正态分布的话，建议对Y变量进行box-cox变换处理
+#由于fit2模型的残差并没有特别明显偏态（偏度为0.058，接近于0），这里就不做变换了
+#需要变换的代码如下
+'''
+import scipy.stats as stats
+#找到box-cox变换的lambda系数
+lamd=stats.boxcox_normmax(your_data_frame.y,method='mle')
+#对Y进行变换
+your_data_frame['trans_y']=stats.boxcox(your_data_frame.y,lamd)
+#建模
+fit=sm.formula.ols('y~x1+x2+…',data=your_data_frame).fit()
+fit.summary()
+
+'''
