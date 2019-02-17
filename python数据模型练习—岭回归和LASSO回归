@@ -1,0 +1,194 @@
+# ======================岭回归和LASSO回归=========================
+
+# 线性回归模型的偏回归系数表达式：beta=(X'X)-1X'y,其中(X'X)-1表示X'X的逆，书写不规范
+# 要能保证该回归系数有解，必须确保X'X矩阵是满秩，即X'X可逆
+# 在实际数据中，自变量之间可能存在高度自相关，即多重共线，就会导致X'X不可逆，偏回归系数无解或无效
+# 出现多重共线问题，可将相关变量删除，或选用岭回归模型
+
+# ==================岭回归模型=========================
+# 岭回归解决的问题
+# 1、自变量间存在高度多重共线性
+# 2、自变量个数大于观测个数
+
+# 岭回归的做法是在X'X的基础上加上一个较小的lambda扰动项，从而使X'X的行列式不再为0
+# 对于岭回归来说，随着lambda的增大，模型方差会减小（因为在矩阵X'X行列式在增大，
+# 其逆会减小，从而使得岭回归系数减小),偏差会增大
+# 通过lambda来平衡模型的方差和偏差，最终得到比较理想的岭回归系数
+
+# 岭回归系数的性质
+# 1、岭回归系数是OLS估计的线性变换，当岭参数为0时，得到最小二乘解
+# 2、当岭参数lambda趋向更大时，岭回归系数beta估计趋向0
+# 2、岭回归系数是有偏的，它的结果使得残差平方和变得更大，但会使系数检验变好
+# 3、当lambda>0时，岭回归系数局域压缩性
+# 4、存在某个lambda，使得岭回归是优于线性回归的，即岭回归的MSE(估计向量的均方误差)<最小二乘的
+
+
+# 岭迹图
+# 是lambda的函数，横坐标为lambda,纵坐标为beta，beta是个向量，每个分量是一条线
+# 不存在奇异性时，岭迹应该是稳定逐渐趋向于0
+
+# 岭迹图作用
+# 1、观察lambda较佳取值
+# 2、观察变量是否有多重共线性，喇叭形状的岭迹图，一般都存在多重共线#
+
+# lambda选择：喇叭口附近的值，此时beta开始趋于稳定，且RSS又不是很大
+# 选择变量：删除beta值一直趋于0的变量（并非十分靠谱）
+
+# 岭回归参数的选择
+# 1、可视化方法
+# 1.1绘制不同lambda值与对应的beta值之间的折线图，寻找使岭回归系数趋于稳定的lambda值；
+#同时与OLS相比，得到的回归系数更符合实际意义
+# 1.2方差膨胀因子法，通过选择最佳的lambda值，使得所有方差膨胀因子不超过10
+# 1.3选择一个lambda值，使得残差平方和趋于稳定（虽然lambda增大会导致残差平方和增加）
+
+# 岭回归缺陷：
+# 1、主要靠目测选择岭参数
+# 2、计算岭参数时，各种方法结果差异较大
+# 一般认为，岭迹图只能看出多重共线性，很难做变量选择 
+
+# =======================LASSO模型================================
+# 主要思想：
+# 1、通过构造一个一阶惩罚函数获得一个精炼的模型
+# 2、通过最终确定的一些指标的系数为零，解释力强（岭回归估计系数为0的机会微乎其微，造成筛选变量困难）
+# 3、擅长出来具有多重共线性的数据，筛选变量，与岭回归一样是有偏估计
+
+# =============================================================================
+# 数据集来自R语言ISLR包中的Hitters数据集，描述的是关于棒球运动员收入相关的信息
+# D:\222学习\数据分析案例资料\Hitters.csv
+
+# 导入第三方包
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.cross_validation import train_test_split
+from sklearn.linear_model import Ridge,RidgeCV
+from sklearn.linear_model import Lasso,LassoCV
+from sklearn.metrics import mean_squared_error
+
+# 读取数据
+df=pd.read_csv(r'D:\222学习\数据分析案例资料\Hitters.csv',engine='python')
+df.head()
+# 哑变量处理
+dummies=pd.get_dummies(df[['League','Division','NewLeague']])
+# 将原始数据集与哑变量数据合并起来
+mydf=df.join(dummies)
+# 缺失值删除
+mydf=mydf.dropna()
+# 删除不必要的变量（字符串变量和各哑变量中的一个变量）
+mydf=mydf.drop(['League','Division','NewLeague','League_N','Division_W','NewLeague_N'],axis=1)
+mydf.head()
+
+# 将数据集拆分成训练集和测试集
+predictors=list(mydf.columns)
+predictors.remove('Salary')#Salary变量为因变量，故需要排除
+x_train,x_test,y_train,y_test=train_test_split(mydf[predictors],mydf['Salary'],
+                                              train_size=0.8,random_state=1234)
+
+# ===========基于可视化选择，选择lambda参数====================
+
+# 通过不确定的alphas值，生成不同的岭回归模型
+alphas=10**np.linspace(-3,3,100)
+ridge_cofficients=[]
+
+for alpha in alphas:
+    ridge=Ridge(alpha=alpha,normalize=True)
+    ridge.fit(x_train,y_train)
+    ridge_cofficients.append(ridge.coef_)
+    
+# 绘制alpha的对数与回归系数的关系
+# 中文乱码和坐标轴负号的处理
+plt.rcParams['font.sans-serif']=['SimHei']
+plt.rcParams['axes.unicode_minus']=False
+
+plt.style.use('ggplot')
+
+plt.plot(alphas,ridge_cofficients)
+plt.xscale('log')
+plt.axis('tight')
+plt.title('alpha系数与岭回归系数的关系')
+plt.xlabel('Log Alpha')
+plt.ylabel('cofficients')
+plt.show()
+
+# 从图形看，alpha在10附近时，所有自变量系数趋于稳定（但也不能完全确定这个值）
+
+# 用交叉验证（CV）方法确定最佳的lambda值
+# 岭回归模型的交叉验证
+ridge_cv=RidgeCV(alphas=alphas,
+                 normalize=True,
+                 scoring='mean_squared_error',
+                 cv=10)
+ridge_cv.fit(x_train,y_train)
+# 取出最佳的lambda值
+ridge_best_alpha=ridge_cv.alpha_
+ridge_best_alpha
+
+# 基于最佳的lambda值建模
+ridge=Ridge(alpha=ridge_best_alpha,normalize=True)
+            #
+ridge.fit(x_train,y_train)
+
+# 岭回归系数
+ridge.coef_
+
+# 预测
+ridge_predict=ridge.predict(x_test)
+
+# 预测效果的验证
+RMSE=np.sqrt(mean_squared_error(y_test,ridge_predict))
+RMSE
+# 以10为lambda值得到的RMSE值为319，以0.01为lambda值时RMSE值为286.86
+
+# =============LASSO回归建模=======================
+
+# 通过不确定的alphas值，生成不同LASSO回归模型
+alphas=10**np.linspace(-3,3,100)
+lasso_cofficients=[]
+
+for alpha in alphas:
+    lasso=Lasso(alpha=alpha,normalize=True,max_iter=10000)
+    lasso.fit(x_train,y_train)
+    lasso_cofficients.append(lasso.coef_)
+    
+# 绘制alpha的对数与回归系数的关系
+plt.rcParams['font.sans-serif']='SimHei'
+plt.rcParams['axes.unicode_minus']=False
+plt.style.use('ggplot')
+plt.plot(alphas,
+        lasso_cofficients)
+plt.xscale('log')
+plt.axis('tight')
+plt.title('alpha系数与LASSO回归系数的关系')
+plt.xlabel('Log Alpha')
+plt.ylabel('Cofficients')
+plt.show()
+
+# 从图像看，大多数曲线在1附近趋于平稳，lambda值应该在1附近
+# 用CV方法确定最佳lambda值
+
+# LASSO回归模型的交叉验证
+lasso_cv=LassoCV(alphas=alphas,
+                normalize=True,
+                cv=10,
+                max_iter=10000)
+lasso_cv.fit(x_train,y_train)
+
+# 取出最佳的lambda值
+lasso_best_alpha=lasso_cv.alpha_
+lasso_best_alpha
+
+# 最佳lambda值为0.23
+
+# 基于最佳的lambda值建模
+lasso=Lasso(alpha=lasso_best_alpha,normalize=True,max_iter=10000)
+lasso.fit(x_train,y_train)
+# 岭回归系数
+lasso.coef_
+
+# 预测
+lasso_predict=lasso.predict(x_test)
+# 预测效果验证
+RMSE=np.sqrt(mean_squared_error(y_test,lasso_predict))
+RMSE
+# lasso得到RMSE的值为286.68
+# 对比岭回归和lasso回归的RMSE值，取值最小的一个模型
