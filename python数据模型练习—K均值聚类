@@ -1,0 +1,102 @@
+# ===============K均值聚类===================
+
+# K均值聚类的算法：
+# 1、随机取K个种子点
+# 2、然后对所有点求K个种子点的距离，将点归入距离最近的种子点类
+# 3、将种子点移动到新群集的中心
+# 4、重复第二、第三步骤，，直到种子点没有移动
+
+# 计算中心点的位置和点与中心点的距离有很多种方法
+
+# K均值聚类的缺点
+# 1、没有指定初始化均值的方法，一种流行的方法是随机选择样本中的K个
+# 2、产生的结果取决于均值的初始值，并且经常发现找到次优分区。解决的方案是尝试许多不同的起点
+# 3、可能发生最接近某个类的样本集是空，因此不能更新类的中心点
+# 4、结果取决K的值
+
+# 数据来源虎扑体育（http://nba.hupu.com/stats/players）
+# 借助NBA球员的命中率和罚球命中率来给各位球员做一次分类
+
+# 加载第三包
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+
+# 读取网页中的数据表
+table =[]
+for i in range(1,7):
+    table.append(pd.read_html(r'https://nba.hupu.com/stats/players/pts/%d'%i)[0])
+# 所有数据纵向合并为数据框
+players=pd.concat(table)
+# 变量重命名
+columns=['排名','球员','球队','得分','命中-出手','命中率','命中-三分','三分命中率','命中-罚球','罚球-命中率','场次','上场时间']
+players.columns=columns
+
+#pl=players[players.排名!='排名']
+players.drop(0,inplace=True)
+pl=players
+print(pl.head())
+# 数据类型转换
+pl.得分=pl.得分.astype('float')
+pl.命中率=pl.命中率.str[:-1].astype('float')/100
+pl.三分命中率=pl.三分命中率.str[:-1].astype('float')/100
+pl['罚球-命中率']=pl['罚球-命中率'].str[:-1].astype('float')/100
+pl.场次=pl.场次.astype('int')
+pl.上场时间=pl.上场时间.astype('float')
+
+pl.head()
+
+# 中文和负号的正常显示
+plt.rcParams['font.sans-serif']=['SimHei']
+plt.rcParams['axes.unicode_minus']=False
+plt.style.use('ggplot')
+pl.plot(x='罚球-命中率',y='命中率',kind='scatter')
+plt.show()
+
+# 通过肉眼无法看聚类，通过迭代的方式选出合适的聚类个数
+# 即让K值从1到K依次执行一遍，查看每次K值对应的蔟内离差平方和之和的变化
+
+# 选择最佳的K值
+x=pl[['罚球-命中率','命中率']]
+k=range(1,int(np.sqrt(pl.shape[0])))
+GSSE=[]
+for i in k:
+    SSE=[]
+    kmeans=KMeans(n_clusters=i,random_state=10)
+    kmeans.fit(x)
+    labels=kmeans.labels_
+    centers=kmeans.cluster_centers_
+    for label in set(labels):
+        SSE.append(np.sum(np.sum((pl[['罚球-命中率','命中率']].loc[labels==label,
+                                                          ]-centers[label,:])**2)))
+    GSSE.append(np.sum(SSE))
+    
+#绘制K的个数和GSSE的关系
+plt.plot(K,GSSE,'b*-')
+plt.xlabel('聚类个数')
+plt.ylabel('蔟内离差平方和')
+plt.title('选择最优的聚类个数')
+plt.show()
+
+# 从图上看，当k为7时，蔟内离差平方和之和的变化慢慢变小，因此确定K=7
+# 调用sklearn的库函数
+num_clusters=7
+kmeans=KMeans(n_clusters=num_clusters,random_state=1)
+kmeans.fit(x)
+
+#聚类结果标签
+pl['cluster']=kmeans.labels_
+#聚类中心
+centers=kmeans.cluster_centers_
+
+#绘制散点图
+plt.scatter(x=x.iloc[:,0],y=x.iloc[:,1],
+            c=pl['cluster'],s=50,cmap='rainbow')
+plt.scatter(centers[:,0],centers[:,1],c='k',marker='*',s=180)
+plt.xlabel('罚球-命中率')
+plt.ylabel('命中率')
+
+plt.show()
+# 黑色五角星为各蔟的中心点
