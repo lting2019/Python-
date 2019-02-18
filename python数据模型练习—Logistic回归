@@ -1,0 +1,103 @@
+#===================Logistic回归==========================
+
+
+# 数据集为用户信息（年龄，性别，收入，购买情况），根据用户年龄、性别、收入判断是否发生购买
+# 数据集：D:\222学习\数据分析案例资料\Social_Network_Ads.csv
+
+
+# 导入第三方包
+import pandas as pd
+import numpy as np
+import statsmodels.formula.api as smf
+from sklearn.model_selection import train_test_split
+from sklearn import metrics
+from ggplot import *
+
+# 读取数据集
+purchase=pd.read_csv(r'D:\222学习\数据分析案例资料\Social_Network_Ads.csv',engine='python')
+# 查看数据类型
+purchase.dtypes
+print(purchase.head())
+
+purchase.shape
+# 只有gender变量为定类数据，需要将gender变为哑变量
+
+
+# 查看各变量的缺失情况
+purchase.isnull().sum()
+# 没有缺失数据
+
+
+#对gender变量做哑变量处理
+dummy=pd.get_dummies(purchase.Gender)
+dummy_drop=dummy.drop('Female',axis=1)
+
+# 剔除用户ID和Gender变量
+purchase=purchase.drop(['User ID','Gender'],axis=1)
+
+# 如果调用Logit类，需要给原数据集添加截距项
+purchase['Intercept']=1
+
+# 哑变量和原数据集合并
+model_data=pd.concat([dummy_drop,purchase],axis=1)
+model_data
+
+# ==============Logistic模型===============
+
+# 将数据集拆分为训练集和测试集
+x=model_data.drop('Purchased',axis=1)
+y=model_data['Purchased']
+# 训练集与测试集的比例为75%和25%
+x_train,x_test,y_train,y_test=train_test_split(x,y,train_size=0.75,random_state=0)
+
+# 根据训练数据集构建Logist分类器
+logistic=smf.Logit(y_train,x_train).fit()
+logistic.summary()
+
+# 经过7次迭代后，模型系数的计算实现收敛，完成Logistic分类器的创建
+# 从系数的显著检验看，Male这个变量不显著
+
+# 删除Male变量重新建模
+# 重新购置分类器
+logistic2=smf.logit('Purchased~Age+EstimatedSalary',
+                   data=pd.concat([y_train,x_train],axis=1)).fit()
+logistic2.summary()
+
+print(logistic.aic)
+print(logistic2.aic)
+# 第一个逻辑回归的AIC为230.7，第二个逻辑回归的AIC为229.18，说明删除Male哑变量的删除是合理的
+
+# 优势比（模型系数解释）
+np.exp(logistic2.params)
+
+# 在其他变量不变的情况下，用户年龄每增加一个单位，用户购买的概率是不购买概率的1.25倍
+# 在其他变量不变的情况下，用户年收入每增加一个单位，用户购买的概率与不购买的概率几乎相等
+
+# ===========模型预测与验证============
+
+# 根据分类器，在测试集上预测概率
+prob=logistic2.predict(exog=x_test.drop('Male',axis=1))
+
+# 根据概率值，将观测进行分类，不妨以0.5作为阈值
+pred=np.where(prob>=0.5,1,0)
+# 根据预测值和实际值构建混淆矩阵
+cm=metrics.confusion_matrix(y_test,pred,labels=[0,1])
+cm
+# 计算模型的准确率
+accuracy=cm.diagonal().sum()/cm.sum()
+accuracy
+# 混淆矩阵对角线代表预测正确的数量
+# 单看混淆矩阵还不够，因为当数据不平衡时，计算的准确率也同样会高，并不代表模型就好
+
+# 借助ROC曲线下的面积来衡量模型的合理
+# 绘制ROC曲线
+fpr,tpr,_=metrics.roc_curve(y_test,pred)
+df=pd.DataFrame(dict(fpr=fpr,tpr=tpr))
+
+ggplot(df,aes(x='fpr',y='tpr'))+\
+    geom_area(alpha=0.5,fill='steelblue')+\
+    geom_line()+\
+    geom_abline(linetype='dashed',color='red')+\
+    labs(x='1-specificity',y='Sensitivity',title='ROC Curve AUC=%.3f'%metrics.auc(fpr,tpr))
+
+# 一般AUC > 0.8就表示比较好
