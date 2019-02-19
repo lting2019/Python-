@@ -1,0 +1,120 @@
+# ===================DBSCAN聚类=======================
+
+# cluster.DBSCAN(eps=0.5,min_samples=5,metric='euclidean',
+#               metric_params=None,
+#               algorithm='auto',
+#               leaf_size=30,
+#               p=None,n_jobs=1)
+# eps:用于设置密度聚类中的半径领域，默认为0.5
+# min_samples:用于设置班级领域内最少的样本量，默认为5
+# metric:用于指定计算点之间距离的方法，默认为欧式距离
+# metric_params:用于之间metric所对应的其他参数值
+# algorithm:在计算点之间距离的过程中，用于指点搜寻最近邻样本点的算法
+# 默认为'auto'，表示m密度聚类会自动选择一个合适的搜寻方法
+# 如果为'ball_tree',则表示使用球树搜寻最近邻
+# 如果为'kd_tree',则表示使用K-D树搜寻最近邻
+# 如果为'brute'，则表示使用暴力法搜寻最近邻
+# leaf_size:当参数algorithm为'ball_tree'或‘kd_tree’时，用于指定数叶子节点中所包含的最多样本量，默认为30
+# 该参数会影响搜寻树的构建和搜寻最近邻的速度
+# p：当参数metric为闵可夫斯基距离时（‘minlowski’），p=1,表示计算点之间的曼哈顿距离，p=2时表示计算点之间的欧式距离，默认为2
+# n_job:用于设置密度聚类算法并行计算所需的CPU数量，默认为1表示仅使用1个CPU运行算法，即不使用并行计算功能
+
+
+# 一般情况下，在参数eps和min_samples需要同时调参，即通常会指定几个候选值，并从候选值中挑选出合理的阈值
+
+# 在参数eps固定的情况下，如果参数min_samples越大，所形成的核心对象就越少，往往会误判出许多异常点，聚成的蔟数目也会增加
+# 在参数min_samples固定的情况下，参数eps越大，就会导致更多的点落入到半径领域内，进而使核心对象增多，聚成的蔟数目减少
+# 在参数eps和min_samples不合理的情况下，蔟数目的增加或减少往往都是错误的
+
+
+# ===============算法实战===================
+# 导入模块
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+# 中文和负号的正常显示
+plt.rcParams['font.sans-serif']=['SimHei']
+plt.rcParams['axes.unicode_minus']=False
+plt.style.use('ggplot')
+
+
+# 读取外部数据
+province=pd.read_excel(r'D:\222学习\数据分析案例资料\Province.xlsx')
+province.head()
+
+# 绘制出生率和死亡率散点图
+plt.scatter(province.Birth_Rate,province.Death_Rate)
+# 添加轴标签
+plt.xlabel('Birth_Rate')
+plt.ylabel('Death_Rate')
+plt.show()
+# 通过观察图形，大致可以分为3个类
+
+# 接下来利用密度聚类对该数据集进行验证
+# 导入第三方包
+
+from sklearn import preprocessing
+from sklearn import cluster
+import numpy as np
+
+# 选取建模的变量
+predictors=['Birth_Rate','Death_Rate']
+
+# 变量的标准化处理
+x=preprocessing.scale(province[predictors])
+x=pd.DataFrame(x)
+# 构建空列表，用于保存不同参数组合下的结果
+res=[]
+# 迭代不同的eps值
+for eps in np.arange(0.001,1,0.05):
+    # 迭代不同的min_samples值
+    for min_samples in range(2,10):
+        dbscan=cluster.DBSCAN(eps=eps,min_samples=min_samples)
+        # 模型拟合
+        dbscan.fit(x)
+        # 统计各参数组合下的聚类个数（-1表示异常点）
+        n_clusters=len([i for i in set(dbscan.labels_) if i !=-1])
+        # 异常点个数
+        outliners=np.sum(np.where(dbscan.labels_==-1,1,0))
+        # 统计每个蔟的样本个数
+        stats=str(pd.Series([i for i in dbscan.labels_ if i !=-1]).value_counts().values)
+        res.append({'eps':eps,'min_samples':min_samples,'n_clusters':n_clusters,
+                   'outliners':outliners,'stats':stats})
+# 将迭代后的结果存储到数据框中
+df=pd.DataFrame(res)
+# 根据条件筛选合理的参数组合
+df.loc[df.n_clusters==3,:]
+
+# 从测试的结果看，eps=0.801，min_samples=3的结果家较为合理（分类为3，异常个数为4）
+# 接下来构造密度聚类模型
+
+# 导入第三方模块
+import seaborn as sns
+
+# 利用上述的参数组合，重建密度聚类算法
+dbscan=cluster.DBSCAN(eps=0.801,min_samples=3)
+# 模型拟合
+dbscan.fit(x)
+province['dbscan_label']=dbscan.labels_
+# 绘制聚类的效果散点图
+sns.lmplot(x='Birth_Rate',y='Death_Rate',hue='dbscan_label',
+          data=province,markers=['*','d','^','o'],fit_reg=False,legend=False)
+# 添加省份标签
+for x,y,text in zip(province.Birth_Rate,
+                    province.Death_Rate,
+                   province.Province):
+    plt.text(x+0.1,y-0.1,text,size=8)
+# 添加参考线
+plt.hlines(y=5.8,xmin=province.Birth_Rate.min(),
+           xmax=province.Birth_Rate.max(),
+          linestyles='--',colors='red')
+plt.vlines(x=10,ymin=province.Death_Rate.min(),
+          ymax=province.Death_Rate.max(),
+          linestyles='--',colors='red')
+# 添加轴标签
+plt.xlabel('Birth_Rate')
+plt.ylabel('Death_Rate')
+plt.show()
+
+# 三角形、菱形和圆形所代表的点为三个不同的蔟，五角星代表异常点
