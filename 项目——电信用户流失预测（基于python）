@@ -1,0 +1,300 @@
+#忽略警告提示
+import warnings
+warnings.filterwarnings('ignore')
+import os
+import numpy as np
+from scipy import  stats
+import pandas as pd
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+import matplotlib.pyplot as plt
+# 导入数据和数据清洗
+os.chdir(r'D:\222学习\数据分析案例资料')
+churn=pd.read_csv(r'telecom_churn.csv')
+print(churn.head())
+
+
+#两变量分析：检验该用户通话时长是否呈现出上升态势(posTrend)对流失(churn) 是否有预测价值
+# ##  分类变量的相关关系
+cross_table=pd.crosstab(churn.posTrend,
+                       churn.churn,margins=True)
+print(cross_table)
+
+# 列联表
+def percConvert(ser):
+    return ser/float(ser[-1])
+cross_table.apply(percConvert,axis=1)
+
+# 卡方检验
+print('''chisq=%6.4f
+p_value=%6.4f
+dof=%i
+expected_freq=%s'''%stats.chi2_contingency(cross_table.iloc[:2,:2]))
+
+# 首先将原始数据拆分为训练和测试数据集，使用训练数据集建立在网时长对流失的逻辑回归，使用测试数据集制作混淆矩阵
+
+#（阈值为0.5），提供准确性、召回率指标，提供ROC曲线和AUC。
+churn.plot(x='duration',y='churn',kind='scatter')
+
+# 随机抽样，建立训练集与测试集
+train=churn.sample(frac=0.7,random_state=1234).copy()
+test=churn[~churn.index.isin(train.index)].copy()
+print(' 训练集样本量: %i \n 测试集样本量: %i' %(len(train), len(test)))
+
+# ----------------------------------使用广义线性回归模型建模-------------------------------------------------------
+lg=smf.glm('churn~duration',data=train,
+          family=sm.families.Binomial(sm.families.links.logit)).fit()
+print(lg.summary())
+
+# ----------------使用向前逐步法从其它备选变量中选择变量，构建基于AIC的最优模型，绘制ROC曲线----------------------------------------
+# 同时检验模型的膨胀系数
+
+# 多元逻辑回归
+# 向前法
+def forward_select(data,response):
+    remaining=set(data.columns)
+    remaining.remove(response)
+    selected=[]
+    current_score,best_new_score=float('inf'),float('inf')
+    while remaining:
+        aic_with_candidates=[]
+        for candidate in remaining:
+            formula='{}~{}'.format(
+                response,'+'.join(selected+[candidate]))
+            aic=smf.glm(
+                formula=formula,data=data,
+                family=sm.families.Binomial(sm.families.links.logit)
+            ).fit().aic
+            aic_with_candidates.append((aic,candidate))
+        aic_with_candidates.sort(reverse=True)
+        best_new_score,best_candidate=aic_with_candidates.pop()
+        if current_score>best_new_score:
+            remaining.remove(best_candidate)
+            selected.append(best_candidate)
+            current_score=best_new_score
+            print('aic is {},continuing!'.format(current_score))
+        else:
+            print('forward selection over!')
+            break
+    formula='{}~{}'.format(response,'+'.join(selected))
+    print('final formula is {}'.format(formula))
+    model=smf.glm(
+        formula=formula,data=data,
+        family=sm.families.Binomial(sm.families.links.logit)
+    ).fit()
+    return(model)
+
+# 建模
+candidates=['churn','duration','AGE','edu_class','posTrend',
+           'negTrend','nrProm','prom','curPlan','avgplan',
+            'planChange','incomeCode','feton','peakMinAv',
+            'peakMinDiff','call_10086']
+data_for_select=train[candidates]
+lg_m1=forward_select(data=data_for_select,response='churn')
+print(lg_m1.summary())
+
+# 计算膨胀因子
+def vif(df,col_i):
+    from statsmodels.formula.api import ols
+    cols=list(df.columns)
+    cols.remove(col_i)
+    cols_noti=cols
+    formula=col_i+'~'+'+'.join(cols_noti)
+    r2=ols(formula,df).fit().rsquared
+    return 1/(1-r2)
+exog=train[candidates].drop(['churn'],axis=1)
+for i in exog.columns:
+    print(i,'\t',vif(df=exog,col_i=i))
+    
+# posTrend,negTrend;nrProm,prom;curPlan,avgplan有明显的共线性问题,剔除其中三个后重新建模 
+
+# 重新建模
+candidates=['churn','duration','AGE','edu_class','posTrend',
+            'prom','curPlan','planChange','incomeCode','feton',
+            'peakMinAv','peakMinDiff','call_10086']
+data_for_select=train[candidates]
+lg_m2=forward_select(data=data_for_select,response='churn')
+print(lg_m2.summary())
+
+
+# ------------------使用岭回归和Laso算法重建第三步中的模型，使用交叉验证法确定惩罚参数(C值)---------------------------------------
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+candidates=['duration','AGE','edu_class','posTrend',
+            'negTrend','nrProm','prom','curPlan','avgplan',
+            'planChange','incomeCode','feton','peakMinAv',
+            'peakMinDiff','call_10086']
+scaler=StandardScaler()# 标准化
+X=scaler.fit_transform(churn[candidates])
+y=churn['churn']
+
+# 正则化
+from sklearn import linear_model
+from sklearn.svm import l1_min_c
+import datetime
+cs=l1_min_c(X,y,loss='log')*np.logspace(0,4)
+print('Computing regularization path …')
+
+start = datetime.datetime.now()
+clf=linear_model.LogisticRegression(C=1,
+                                   penalty='l1',tol=1e-6)
+coefs_=[]
+for c in cs:
+    clf.set_params(C=c)
+    clf.fit(X,y)
+    coefs_.append(clf.coef_.ravel().copy())
+print("This took ", datetime.datetime.now() - start)
+
+# 绘图
+coefs_=np.array(coefs_)
+plt.plot(np.log10(cs),coefs_)
+ymin, ymax = plt.ylim()
+plt.xlabel('log(C)')
+plt.ylabel('Coefficients')
+plt.title('Logistic Regression Path')
+plt.axis('tight')
+plt.show()
+
+# 交叉验证参数
+cs=l1_min_c(X,y,loss='log')*np.logspace(0,4)
+import matplotlib.pyplot as plt
+from sklearn.model_selection import cross_val_score # K折交叉验证
+
+k_scores=[]
+clf=linear_model.LogisticRegression(penalty='l1')
+# 藉由迭代的方式来计算不同参数对模型的影响，并返回交叉验证后的平均准确率  
+for c in cs:
+    clf.set_params(C=c)
+    scores=cross_val_score(clf,X,y,cv=10,scoring='roc_auc')
+    k_scores.append([c,scores.mean(),scores.std()])
+    
+# 可视化
+data=pd.DataFrame(k_scores) # 将字典转换成为数据框
+fig=plt.figure()
+ax1=fig.add_subplot(111)
+ax1.plot(np.log10(data[0]),data[1],'b')
+ax1.set_ylabel('log10(cs)')
+ax2=ax1.twinx()
+ax2.plot(np.log10(data[0]),data[2],'r')
+ax2.set_ylabel('Std ROC Index(Red)')
+
+
+
+# 重新实现Laso算法
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+candidates=['duration','AGE','edu_class','posTrend','negTrend',
+            'nrProm','prom','curPlan','avgplan','planChange',
+            'incomeCode','feton','peakMinAv','peakMinDiff','call_10086']
+scaler=StandardScaler() # 标准化
+X=scaler.fit_transform(train[candidates])
+y=train['churn']
+
+from sklearn import linear_model
+clf=linear_model.LogisticRegression(C=np.exp(-1.9),penalty='l1')
+clf.fit(X,y)
+print(clf.coef_)
+
+# -------------------------------------模型评估--------------------------------------------------------------------
+
+from sklearn import metrics
+
+# lg模型预测
+train['lg_proba']=lg.predict(train)
+test['lg_proba']=lg.predict(test)
+
+# lg_m2模型预测
+train['lg_m2_proba']=lg_m2.predict(train)
+test['lg_m2_proba']=lg_m2.predict(test)
+
+# clf模型预测
+X1=scaler.fit_transform(test[candidates])
+y1=test['churn']
+train['clf_proba']=clf.predict(X)
+test['clf_proba']=clf.predict(X1)
+
+
+# 设定阈值
+test['lg_prediction']=(test['lg_proba']>0.5).astype('int')
+test['lg_m2_prediction']=(test['lg_m2_proba']>0.5).astype('int')
+test['clf_prediction']=(test['clf_proba']>0.5).astype('int')
+
+# 混淆矩阵
+#pd.crosstab(test.churn,lg_test.prediction,margins=True)
+
+
+# 计算准确率
+lg_acc=sum(test['lg_prediction']==test['churn'])/np.float(len(test))
+lg_m2_acc=sum(test['lg_m2_prediction']==test['churn'])/np.float(len(test))
+clf_acc=sum(test['clf_prediction']==test['churn'])/np.float(len(test))
+
+print('The accurancy of lg is %.2f'%lg_acc,'\n')
+print('The accurancy of lg_m2 is %.2f'%lg_m2_acc,'\n')
+print('The accurancy of clf is %.2f'%clf_acc,'\n')
+
+# 绘制Roc曲线
+#for i in np.arange(0.1,0.9,0.1):
+i=0.5
+lg_prediction=(test['lg_proba']>i).astype('int')
+lg_m2_prediction=(test['lg_m2_proba']>i).astype('int')
+clf_prediction=(test['clf_proba']>i).astype('int')
+    
+lg_confusion_matrix=pd.crosstab(lg_prediction,test.churn,margins=True)
+lg_m2_confusion_matrix=pd.crosstab(lg_m2_prediction,test.churn,margins=True)
+clf_confusion_matrix=pd.crosstab(clf_prediction,test.churn,margins=True)
+    
+print(metrics.classification_report(test.churn, lg_prediction))  # 计算评估指标
+print(metrics.classification_report(test.churn, lg_m2_prediction))  # 计算评估指标
+print(metrics.classification_report(test.churn, clf_prediction))  # 计算评估指标
+    
+#lg_precision=lg_confusion_matrix.iloc[0,0]/lg_confusion_matrix.iloc[2,0]
+#lg_recall=lg_confusion_matrix.iloc[0,0]/lg_confusion_matrix.iloc[0,2]
+#lg_Specificity=lg_confusion_matrix.iloc[1,1]/lg_confusion_matrix.iloc[1,2]
+#lg_f1_score=2*(lg_precision*lg_recall)/(lg_precision+lg_recall)
+#print('threshoid:%s,precision:%.2f,recall:%.2f,Specificity:%.2f,f1_score:%.2f'%(i,lg_precision,lg_recall,lg_Specificity,lg_f1_score))
+
+import sklearn.metrics as metrics
+lg_fpr_test,lg_tpr_test,lg_th_test=metrics.roc_curve(test.churn,test.lg_proba)
+lg_fpr_train,lg_tpr_train,lg_th_train=metrics.roc_curve(train.churn,train.lg_proba)
+
+lg_m2_fpr_test,lg_m2_tpr_test,lg_m2_th_test=metrics.roc_curve(test.churn,test.lg_m2_proba)
+lg_m2_fpr_train,lg_m2_tpr_train,lg_m2_th_train=metrics.roc_curve(train.churn,train.lg_m2_proba)
+
+    
+clf_fpr_test,clf_tpr_test,clf_th_test=metrics.roc_curve(test.churn,test.clf_proba)
+clf_fpr_train,clf_tpr_train,clf_th_train=metrics.roc_curve(train.churn,train.clf_proba)
+
+
+plt.subplots_adjust(hspace=0.3,wspace=0.3)
+plt.subplot(221)
+
+plt.plot(lg_fpr_test,lg_tpr_test,'b--',label='test')
+plt.plot(lg_fpr_train,lg_tpr_train,'r--',label='train')
+plt.title('lg_ROC curve')
+plt.legend(loc='best')
+
+plt.subplot(222)
+plt.plot(lg_m2_fpr_test,lg_m2_tpr_test,'b--',label='test')
+plt.plot(lg_m2_fpr_train,lg_m2_tpr_train,'r--',label='train')
+plt.title('lg_m2_ROC curve')
+plt.legend(loc='best')
+
+plt.subplot(223)
+plt.plot(clf_fpr_test,clf_tpr_test,'b--',label='test')
+plt.plot(clf_fpr_train,clf_tpr_train,'r--',label='train')
+plt.title('clf_ROC curve')
+plt.legend(loc='best')
+
+plt.subplot(224)
+plt.plot(lg_fpr_test,lg_tpr_test,'b--',label='lg')
+plt.plot(lg_m2_fpr_test,lg_m2_tpr_test,'r--',label='lg_m2')
+plt.plot(clf_fpr_test,clf_tpr_test,'g--',label='cfl')
+plt.title('ROC_test curve')
+plt.legend(loc='best')
+plt.subplots_adjust(hspace=0.5,wspace=0.3)
+plt.show()
+
+print('lg_AUC=%.4f'%metrics.auc(lg_fpr_test,lg_tpr_test))
+print('lg_m2_AUC=%.4f'%metrics.auc(lg_m2_fpr_test,lg_m2_tpr_test))
+print('clf_AUC=%.4f'%metrics.auc(clf_fpr_test,clf_tpr_test))
