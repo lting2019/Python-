@@ -1,0 +1,196 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import datetime
+
+plt.style.use('ggplot')
+
+# 导入数据并查看数据的基本信息
+columns=['use_id','order_dt','order_products','order_amount']
+df=pd.read_csv(r'D:\222学习\数据分析案例资料\CDNOW_master.txt',names=columns,sep='\s+',engine='python')
+df.head()
+df.info()
+df.describe()
+
+# 整理数据
+df['order_date']=pd.to_datetime(df.order_dt,format='%Y%m%d')
+df['month']=df.order_date.values.astype('datetime64[M]') # 将月份表示为年份加月
+df.head()
+
+# ------------------------------探索数据的基本内容和数据反应内容-----------------------------------------------------------------
+
+# 查看用户在统计期间的整体购买情况，这个数据意义不大
+use_grouped=df.groupby(['use_id']).sum()
+use_grouped.head()
+use_grouped.describe() # 使用group构建数据框
+
+# 查看每个月产品的销量趋势
+df.groupby('month').order_products.sum().plot()
+
+# 查看每个月产品的销售额趋势
+df.groupby('month').order_amount.sum().plot()
+
+# 查看每个订单的销量和销售额的关系
+df.plot.scatter(x='order_amount',y='order_products')
+
+# 查看每个用户的销量和销售额情况
+df.groupby('use_id').sum().plot.scatter(x='order_amount',y='order_products')
+
+# 查看订单记录中订单金额的直方图
+plt.figure(figsize=(12,4))
+plt.subplot(121)
+df.order_amount.hist(bins=300)
+# 查看用户记录中销量的直方图
+plt.subplot(122)
+df.groupby('use_id').order_products.sum().hist(bins=30)
+
+# 查看用户的生命开始期
+df.groupby('use_id').month.min().value_counts()
+# 查看用户的生命结束期
+df.groupby('use_id').month.max().value_counts()
+
+# 用户销售额累计贡献图
+user_amount=df.groupby('use_id').order_amount.sum().sort_values(ascending=False).reset_index()
+user_amount['amount_cumsum']=user_amount.order_amount.cumsum()
+user_amount['prop']=user_amount.apply(lambda x:x.amount_cumsum/user_amount.amount_cumsum.max(),axis=1)
+user_amount.prop.plot()
+
+# --------------------------- 统计用户的复购率和回购率-------------------------------------------------------
+
+# 统计每个用户在每个月的购买频次
+pivoted_counts=df.pivot_table(index='use_id',columns='month',
+                             values='order_dt',aggfunc='count').fillna(0)
+columns_month=df.month.sort_values().astype('str').unique()
+pivoted_counts.columns=columns_month # 截断日期后的时间
+pivoted_counts.head()
+
+# 统计每个用户的复购情况
+pivoted_counts_tran=pivoted_counts.applymap(lambda x:1 if x>1 else np.NaN if x==0 else 0)
+pivoted_counts_tran.head()
+
+# 统计用户每个月的复购率，查看复购率趋势
+(pivoted_counts_tran.sum()/pivoted_counts_tran.count()).plot(figsize=(10,4))
+
+# 统计用户每个月平均购买金额
+pivoted_amount=df.pivot_table(index='use_id',columns='month',
+                             values='order_amount',aggfunc='mean').fillna(0)
+columns_month=df.month.sort_values().astype('str').unique()
+pivoted_amount.columns=columns_month # 截断日期后的时间
+pivoted_amount.head()
+
+# 统计用户每个月是否发生购买
+pivoted_purchase=pivoted_amount.applymap(lambda x: 1 if x>0 else 0)
+pivoted_purchase.head()
+
+# 构造函数统计是否每个用户每个月是否发生回购率
+def purchase_return(data):
+    status=[]
+    for i in range(17):
+        if data[i]==1:
+            if data[i+1]==1:
+                status.append(1)
+            if data[i+1]==0:
+                status.append(0)
+        else:
+            status.append(np.NaN)
+    status.append(np.NaN)
+    return status
+pivoted_purchase_return =pivoted_purchase.apply(lambda x : purchase_return(x),axis=1,result_type='expand')
+pivoted_purchase_return.columns=pivoted_purchase.columns
+pivoted_purchase_return.head()  # 回购率基础表
+
+# 统计每个月的回购率和查看回购率趋势图
+(pivoted_purchase_return.sum()/pivoted_purchase_return.count()).plot(figsize=(10,4))
+
+# ------------------------------------查看用户画像--------------------------------------------------------------------
+
+def active_status(user):
+    status=[]
+    for i in range(18):
+        
+        # 本月没有消费
+        if user[i]==0:
+            if len(status)>0:
+                if status[i-1]=='regis':#未注册
+                    status.append('regis')
+                else:
+                    status.append('unactive')
+            else:
+                status.append('regis')
+                
+        # 本月有消费
+        else:
+            if len(status)==0:
+                status.append('new')
+            else:
+                if status[i-1]=='unactive':
+                     status.append('return')
+                elif status[i-1]=='regis':
+                    status.append('new')
+                else:
+                     status.append('active')
+    return status
+pivoted_purchase_status=pivoted_purchase.apply(lambda x:active_status(x),axis=1,result_type='expand')
+pivoted_purchase_status.columns=pivoted_purchase.columns
+pivoted_purchase_status.head() # 生命周期基础表
+# 统计每个月用户的生命阶段构成
+status_counts=pivoted_purchase_status.replace('regis',np.NaN).apply(lambda x:pd.value_counts(x))
+# 每个月用户构成面积图
+status_counts.fillna(0).T.plot(kind='area')
+
+# 查看每个月回流用户和活跃用户的占比情况
+rate=status_counts.apply(lambda x:x/x.sum(),axis=1)
+rate.loc['return'].plot()
+rate.loc['active'].plot()
+
+# -----------------------------用户生命周期--------------------------------------------------------------------
+# 统计每个用户生命周期
+(df.groupby('use_id').order_date.max()-df.groupby('use_id').order_date.min()).describe()
+
+# 用户生命周期直方图
+((df.groupby('use_id').order_date.max()-df.groupby('use_id').order_date.min())/np.timedelta64(1,'D')).hist(bins=100)
+
+# 因为这里的数据类型是timedelta时间，它无法直接作出直方图，所以先换算成数值。
+# 换算的方式直接除timedelta函数即可，这里的np.timedelta64(1, ‘D’)，D表示天，1表示1天，作为单位使用的
+# 因为max-min已经表示为天了，两者相除就是周期的天数。
+
+# 筛选生命周期大于0的用户，做生命周期直方图
+life_time[life_time>0].hist(bins=200)
+
+# -------------------------------用户留存 ----------------------------------------------------------------------
+
+# 用户留存 
+user_purchase=df[['use_id','order_products','order_amount','order_date']]
+user_retention=pd.merge(left=user_purchase,right=df.groupby('use_id').order_date.min().reset_index(),how='inner',on='use_id',suffixes=('','_min'))
+user_retention['diff']=(user_retention['order_date']-user_retention['order_date_min']).apply(lambda x: x/np.timedelta64(1,'D'))
+
+# 将用户消费时间划分为距第一次消费后的0-3天，3-7天等
+user_retention['diff_bin']=pd.cut(user_retention['diff'],bins=[0,3,7,15,30,60,90,180,365])
+# 用户在不同消费时间段的消费金额
+pivoted=user_retention.pivot_table(index='use_id',columns='diff_bin',values='order_amount',aggfunc=sum)
+
+# 计算每个时间段的用户留存率
+pivoted_trans=pivoted.fillna(0).applymap(lambda x:1 if x>0 else 0) # 将有消费金额转化为消费次数
+(pivoted_trans.sum()/pivoted_trans.count()).plot(kind='bar')
+
+
+# ----------------------------用户消费间隔-------------------------------------------------------------------------
+# 用户消费间隔
+def diff(group):
+    d=group['diff']-group['diff'].shift(-1)
+    return d
+last_diff=user_retention.groupby('use_id').apply(diff)
+last_diff.mean()
+
+# 用户消费间隔直方图
+last_diff.hist(bins=20)
+
+
+# ----------------------------分组数据框示例------------------------------------------------------------------------------
+grouped=user_retention.groupby('use_id')
+i=0
+for user,group in grouped:
+    print(group)
+    i+=1
+    if i ==2:
+        break
