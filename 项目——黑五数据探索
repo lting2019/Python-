@@ -1,0 +1,241 @@
+# 数据分析得到的结论一定要想到相对的策略
+
+# 数据分析的框架一定要有，平时做分析练习就要按照步骤来，步骤清晰了以后同样的问题就可以随时应对
+
+# 学习技能也好，学习业务也好，都要用章法
+
+# 按章法走，孰能生巧，善总结，坚持自然水到渠成
+
+import pandas as pd
+import numpy as np
+import seaborn as sns
+
+df=pd.read_csv(r'D:\222学习\数据分析案例资料\BlackFriday.csv',engine='python')
+
+#----------------------------------认识数据---------------------------------------------------------------------------
+# 查看数据行列数据
+df.shape
+
+# 查看数据的部分内容
+df.head()
+# 查看数据的缺失情况和数据类型
+df.info()
+# 查看数据的描述性分析
+df.describe()
+df_describe=df.describe(include=['object'])
+df_describe.loc['percent']=100*(df_describe.loc['freq'] / df_describe.loc['count'])
+display(df_describe)
+# 查看用户是否重复
+len(df.User_ID.unique())
+
+#---------------------------------数据整理---------------------------------------------------------------------------
+
+# 查看缺失值
+
+#--------------------------------了解数据基本情况---------------------------------------------------------------------
+
+#--------------------------------用户画像------------------------------------------------------------------------------
+
+# 可用从客户的属性了解主要客户人群、主要金额贡献、产品偏好，这样的分析内容就是：n（客户属性数量）*3（分别是人群数量、金额贡献、产品偏好三个内容）
+# 在报告中怎么展示这样的分析呢？1、可以以客户属性为分类，每个属性同时展示3个内容 2、可以以3个数据内容展示，每个内容展示N个属性（第二种方法显得凌乱）
+# 这些基本数据了解基本都会含有最高贡献的用户类型，在问题提出的时候可以提：哪个性别的贡献最高？哪个年龄层的贡献最高？
+
+# 以第一种方法展示数据基本内容
+
+# =============性别======================
+# 性别在购买人次和购买金额在占比
+import matplotlib.pyplot as plt
+plt.rcParams['font.sans-serif']=['SimHei']
+plt.rcParams['axes.unicode_minus']=False
+
+
+gender_gb=df[['Gender', 'Purchase']].groupby('Gender').agg(['count','sum'])
+params={'labels':gender_gb.index.map({'M':'男','F':'女'}),
+       'autopct':'%.1f%%',
+        'explode':(0.05,0),
+       'textprops':{'fontsize':15}}
+plt.subplot(121)
+plt.pie(gender_gb['Purchase']['count'],**params)
+plt.title('购买人次',size=17)
+
+plt.subplot(122)
+plt.pie(gender_gb['Purchase']['sum'],**params)
+plt.title('金额',size=17)
+plt.show()
+
+# 性别在购买金额的箱线图
+Gender=[]
+levels=df.Gender.unique()
+for gd in levels:
+    Gender.append(df.loc[df.Gender==gd,'Purchase'])
+levels
+plt.boxplot(x=Gender,
+           patch_artist=True,
+           labels=['女','男'],
+           showmeans=True,
+           boxprops={'color':'black','facecolor':'#9999ff'},
+           flierprops={'marker':'o','markerfacecolor':'red','color':'black'},
+           meanprops={'marker':'D','markerfacecolor':'indianred'},
+           medianprops={'linestyle':'--','color':'orange'}
+           )
+plt.show()
+
+# 不同性别的产品偏好
+
+
+# ====================年龄================
+# 按年龄分组
+age_gb=df[['Age', 'Purchase']].groupby('Age').agg(['count','sum'])
+
+# 查看购买人数占比
+
+age_gb['Purchase']['count'].plot(kind='barh',title='购买人数占比',figsize=(6,5))
+
+# 查看购买金额占比
+age_gb['Purchase']['sum'].plot(kind='barh',title='购买金额占比',figsize=(6,5))
+
+# 查看不同年龄层人均购买金额
+df[['Age', 'Purchase']].groupby('Age').agg(['mean'])
+
+# 查看每个年龄层的产品偏好
+age_product_gb=df[['Age', 'Product_ID', 'Purchase']].groupby(['Age', 'Product_ID']).agg('count').rename(columns={'Purchase': 'count'})
+
+age_product_gb.sort_values('count',ascending=False,inplace=True)
+
+ages=sorted(df.Age.unique())
+
+output=pd.DataFrame({x: list(age_product_gb.loc[x].index)[:5] for x in ages},
+                   index=['#{}'.format(x) for x in range(1,6)])
+display(output)
+
+
+# =================客户职业============
+
+# 不同职业和性别的购买人数占比
+pivoted=df.pivot_table(index='Occupation',columns='Gender',values='Purchase',aggfunc='count')
+pivoted.plot.bar(stacked=True)
+
+# 不同职业的产品偏好
+occupation_product_gb=df[['Occupation', 'Product_ID', 'Purchase']].groupby(['Occupation', 'Product_ID']).agg('count').rename(columns={'Purchase': 'count'})
+
+occupation_product_gb.sort_values('count',ascending=False,inplace=True)
+
+occupations=sorted(df.Occupation.unique())
+
+output=pd.DataFrame({x: list(occupation_product_gb.loc[x].index)[:5] for x in occupations},
+                   index=['#{}'.format(x) for x in range(1,6)])
+display(output)
+
+# ==================城市=================
+# 不同城市和居住年限的购买人数占比
+pivoted=df.pivot_table(index='City_Category',columns='Stay_In_Current_City_Years',values='Purchase',aggfunc='count')
+pivoted.plot.bar(stacked=True,figsize=(8,7))
+
+# 不同年限的购买占比
+siccy_gb=df[['Stay_In_Current_City_Years', 'Purchase']].groupby('Stay_In_Current_City_Years').agg(['count'])
+siccy_gb['Purchase']['count'].plot(kind='bar')
+
+# =================婚姻状况===================
+
+# 不同婚姻状况和性别的购买人数占比
+pivoted=df.pivot_table(index='Marital_Status',columns='Gender',values='Purchase',aggfunc='count')
+pivoted.plot.bar(stacked=True,figsize=(8,7))
+
+#-------------------------------------------热卖产品情况----------------------------------------------------------
+
+# 最热卖的产品ID
+# 购买人数最多的产品ID前20
+product_count_gb=df[['Product_ID',  'Purchase']].groupby([ 'Product_ID']).agg('count').rename(columns={'Purchase': 'count'})
+product_count_gb['count%']=product_count_gb.apply(lambda x:x['count']/product_count_gb['count'].sum(),axis=1)
+product_count_gb.sort_values('count',ascending=False,inplace=True)
+product_count_gb.head(20)
+
+# 销售金额贡献最大的前20
+product_sum_gb=df[['Product_ID',  'Purchase']].groupby([ 'Product_ID']).agg('sum').rename(columns={'Purchase': 'sum'})
+product_sum_gb['sum%']=product_sum_gb.apply(lambda x:x['sum']/product_sum_gb['sum'].sum(),axis=1)
+product_sum_gb.sort_values('sum',ascending=False,inplace=True)
+product_sum_gb.head(20)
+
+
+# 最热卖的产品属性一
+Product_Category_1_gb=df[['Product_Category_1', 'Purchase']].groupby('Product_Category_1').agg(['count'])
+Product_Category_1_gb['Purchase']['count'].plot(kind='bar')
+
+
+# 最热卖的产品属性二
+Product_Category_2_gb=df[['Product_Category_2', 'Purchase']].groupby('Product_Category_2').agg(['count'])
+Product_Category_2_gb['Purchase']['count'].plot(kind='bar')
+
+
+# 最热卖的产品属性三
+
+Product_Category_3_gb=df[['Product_Category_3', 'Purchase']].groupby('Product_Category_3').agg(['count'])
+Product_Category_3_gb['Purchase']['count'].plot(kind='bar')
+
+
+# ------------------------------------top榜单-------------------------------------------------------------
+
+# 贡献金额最多的产品
+product_sum_gb=df[['Product_ID','Purchase']].groupby([ 'Product_ID']).agg('sum').rename(columns={'Purchase': 'sum'})
+product_sum_gb['sum%']=product_sum_gb.apply(lambda x:x['sum']/product_sum_gb['sum'].sum(),axis=1)
+product_sum_gb.sort_values('sum',ascending=False,inplace=True)
+product_sum_gb.head(20)
+
+# 贡献最多的商户
+User_ID_sum_gb=df[['User_ID','Purchase']].groupby([ 'User_ID']).agg('sum').rename(columns={'Purchase': 'sum'})
+User_ID_sum_gb['sum%']=User_ID_sum_gb.apply(lambda x:x['sum']/User_ID_sum_gb['sum'].sum(),axis=1)
+User_ID_sum_gb.sort_values('sum',ascending=False,inplace=True)
+User_ID_sum_gb.head(20)
+
+# -----------------------------------数据挖掘----------------------------------------------------------------------------
+
+# 人群分组(聚类)  这个方案有待改进
+
+# 筛选出类别特征
+train = df.drop(['Product_ID', 'Product_Category_1', 'Product_Category_2', 'Product_Category_3', 'Purchase'], axis=1).groupby('User_ID')
+
+# 热编码
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
+train = train.agg(lambda x: x.value_counts().index[-1])
+feaures_list = list(train.columns.values)
+encoder = OneHotEncoder().fit(train[feaures_list])
+train = pd.concat([train, pd.DataFrame(encoder.transform(train[feaures_list]).toarray(), index=train.index, columns=encoder.get_feature_names(feaures_list))], axis=1)
+train.drop(feaures_list, axis=1, inplace=True)
+
+# 对前100产品和类别1产品做数据整理
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
+train = train.agg(lambda x: x.value_counts().index[-1])
+feaures_list = list(train.columns.values)
+encoder = OneHotEncoder().fit(train[feaures_list])
+train = pd.concat([train, pd.DataFrame(encoder.transform(train[feaures_list]).toarray(), index=train.index, columns=encoder.get_feature_names(feaures_list))], axis=1)
+train.drop(feaures_list, axis=1, inplace=True)
+
+# 合并数据集
+train = train.join(df[['User_ID', 'Purchase']].groupby('User_ID').agg('sum'))
+# 聚类前的标准化
+train_scaled = StandardScaler().fit_transform(train)
+
+# 寻找聚类K值
+from sklearn.cluster import KMeans
+
+k_values = np.arange(1, 11)
+models = []
+dists = []
+for k in k_values:
+    model = KMeans(k).fit(train_scaled)
+    models.append(model)
+    dists.append(model.inertia_)
+
+plt.figure(figsize=(9, 6))
+plt.plot(k_values, dists, 'o-')
+plt.ylabel('Sum of squared distances', size=13)
+plt.xlabel('K', size=13)
+plt.xticks(k_values)
+plt.show()
+
+# 训练数据求轮廓系数
+from sklearn.metrics import silhouette_score
+
+model = models[2]
+print("Silhouette score: {:.2f}".format(silhouette_score(train_scaled, model.predict(train_scaled))))
+
