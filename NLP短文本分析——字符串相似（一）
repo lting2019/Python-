@@ -1,0 +1,46 @@
+# 导入工具库
+import pandas as pd
+import numpy as np
+
+# 导入字符串模糊匹配工具
+from fuzzywuzzy import fuzz
+from fuzzywuzzy import process
+# -----------------------------------------------------------------
+
+# 导入数据集，数据集100多行，是两列文本字段，
+# 数据集表示酒店自己网站上的客房描述和对应在booking上的客房描述
+# 对应的描述是相同的客房
+# 目的用于使用不同短文本相似计算方法比较算法的优劣
+df=pd.read_csv(r'D:\222学习\数据分析案例资料\NLP\room_type.csv',engine='python')
+
+# 查看数据集
+df.head()
+# ----------------------------------------------------------------
+
+# 使用fuzz的ratio函数,该函数按顺序比较整个字符串的相似度，全匹配，效果会很不好
+fuzz.ratio('Deluxe Room,1 King Beg','Deluxe King Room')
+fuzz.ratio('Standard Room,1 King Bed,Accesstble',"Standard King Roll_in Shower Accessible")
+fuzz.ratio('Suite,1 King Bed(Parlor)','King Parlor Suite')
+
+# 使用fuzz的partial_ratio函数,该函数表示对字符串模糊匹配（部分字符串匹配），效果会也不好
+fuzz.partial_ratio('Deluxe Room,1 King Bed','Deluxe King Room')
+fuzz.partial_ratio('Standard Room,1 King Bed,Accesstble','Standard King Roll_in Shower Accessible')
+fuzz.partial_ratio('Suite,1 King Bed(Parlor)','King Partlor Suite')
+
+# 使用fuzz的token_sort_ratio函数,该函数忽略单词顺序，效果会也不好
+fuzz.token_sort_ratio('Deluxe Room,1 King Bed','Deluxe King Room')
+fuzz.token_sort_ratio('Standard Room,1 King Bed,Accesstble',"Standard King Roll_in Shower Accessible")
+fuzz.token_sort_ratio('Suite,1 King Bed(Parlor)','King Partlor Suite')
+
+# 使用fuzz的token_set_ratio函数,该函数忽略重复的单词
+fuzz.token_set_ratio('Deluxe Room,1 King Bed','Deluxe King Room')
+fuzz.token_set_ratio('Standard Room,1 King Bed,Accesstble',"Standard King Roll_in Shower Accessible")
+fuzz.token_set_ratio('Suite,1 King Bed(Parlor)','King Partlor Suite')
+
+# 使用第四个函数来对数据集的每行计算文本相似性
+# 计算相似度达70%以上的对数占比有多少
+def get_ratio(row):
+    name=row['Expedia']
+    name1=row['Booking.com']
+    return fuzz.token_set_ratio(name,name1)
+len(df[df.apply(get_ratio,axis=1)>70])/len(df)
